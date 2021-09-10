@@ -55,7 +55,7 @@ fn colorAlbedo(r: Ray, w: *const World) Vec3f {
         return switch (hit.material) {
             Material.Lambertian => |l| l.albedo,
             Material.Metal => |m| m.albedo,
-            Material.Dielectric => |l| Vec3f.one(),
+            Material.Dielectric => |_| Vec3f.one(),
         };
     } else {
         const unit_direction = r.direction.makeUnitVector();
@@ -232,10 +232,10 @@ pub fn main() !void {
     {
         _ = c.SDL_LockSurface(surface);
 
-        var tasks = ArrayList(*std.Thread).init(std.testing.allocator);
-        defer tasks.deinit();
-        var contexts = ArrayList(ThreadContext).init(std.testing.allocator);
-        defer contexts.deinit();
+        var tasks = try std.testing.allocator.alloc(std.Thread, num_threads);
+        defer std.testing.allocator.free(tasks);
+        var contexts = try std.testing.allocator.alloc(ThreadContext, num_threads);
+        defer std.testing.allocator.free(contexts);
 
         const chunk_size = blk: {
             const num_pixels = window_width * window_height;
@@ -251,7 +251,7 @@ pub fn main() !void {
         {
             var ithread: i32 = 0;
             while (ithread < num_threads) : (ithread += 1) {
-                try contexts.append(ThreadContext{
+                contexts[@intCast(usize, ithread)] = ThreadContext{
                     .thread_index = ithread,
                     .num_pixels = window_width * window_height,
                     .chunk_size = chunk_size,
@@ -259,15 +259,13 @@ pub fn main() !void {
                     .surface = surface,
                     .world = &world,
                     .camera = &camera,
-                });
-                const thread = try std.Thread.spawn(&contexts.items[@intCast(usize, ithread)], renderFn);
-
-                try tasks.append(thread);
+                };
+                tasks[@intCast(usize, ithread)] = try std.Thread.spawn(.{}, renderFn, .{&contexts[@intCast(usize, ithread)]});
             }
         }
 
-        for (tasks.items) |task| {
-            task.wait();
+        for (tasks) |task| {
+            task.join();
         }
 
         c.SDL_UnlockSurface(surface);
